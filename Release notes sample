@@ -1,0 +1,175 @@
+
+Version	1.0
+Date	07/03/2016
+Status	Initial Version
+Classification	Internal
+
+ 
+Table of Contents
+1	Document Purpose	4
+2	Change Overview	4
+2.1	Description	4
+2.2	Environments	4
+2.2.1	Source Environments	4
+2.2.2	Destination Environments	5
+3	Change Content	6
+3.1	System Functionality	6
+3.2	Defects	6
+3.3	Change Requests	6
+3.4	Known Issue	6
+
+3.4.1	Outstanding defects …… …………………………………………………………..…………………………………7
+4	Technical Impacts	8
+5	Software Component Details	9
+5.1	Code Modifications	9
+5.1.1	PUB	10
+5.1.2	Teradata Database Steps	10
+5.2	Documentation Modifications	10
+5.3	Parameter Modifications	10
+5.4	Messaging/Transaction Updates	10
+5.5	Database Updates	10
+5.6	Unix Updates	10
+
+6	Delivery details…………………………………………………………………………………….………..……..……………10
+6.1	Deliverable location…………………………………………………………………….…………………………….10
+6.2	Deployment strategy……………………………………………………………………………….…………………11
+6.3	Run strategy………………………………………………………………………………………..…………………….11
+6.4	Dependencies………………………………………...……….……………………………..………….…………...12
+7	References	113
+8	Document Control	15
+8.1	Version Control	15
+8.2	Acceptance	15
+
+ 
+1	Document Purpose
+This document summarises the information relating to the solution components that need to be created for APRA 2.0 Release. 
+
+ 
+2	Change Overview
+2.1	Description
+Creating new databases in production environment as part of APRA 2.0 release and implement all teradata objects into respective databases.
+2.2	Environments
+All APRA teradata components have to be moved to respective new databases. Below are the databases with respective type of teradata objects.
+SIT07_CNSUM_RRP_GEN_VW 	–	 Dynamic views
+SIT07_CNSUM_RRP_PGM		–	 Stored Procedures
+SIT07_CNSUM_RRP_T			    –		 Tables
+SIT07_CNSUM_RRP_VW		–	 Static views
+SIT07_CNSUM_RRP_WK		–	 work tables
+
+
+SIT07_BRL_RRP_GEN_VW 		–	 Dynamic views
+SIT07_BRL_RRP_PGM		–	 Stored Procedures
+SIT07_BRL_RRP_T		–	 Tables
+SIT07_BRL_RRP_VW		–	 Static views
+SIT07_BRL_RRP_WK		–	 work tables
+2.2.1	Source Environments
+DEVD1_CNSUM_APRA_GEN_VW 	–	 Dynamic views
+DEVD1_CNSUM_APRA_PGM   	–	 Stored Procedures
+DEVD1_CNSUM_APRA_T     	–	 Tables
+DEVD1_CNSUM_APRA_VW    	–	 Static views
+DEVD1_CNSUM_APRA_WK 	–	 work tables 
+
+
+DEVD1_BRL_APRA_GEN_VW   	–	 Dynamic views
+DEVD1_BRL_APRA_PGM      	–	 Stored Procedures
+DEVD1_BRL_APRA_T        	–	 Tables
+DEVD1_BRL_APRA_VW       	–	 Static views
+DEVD1_BRL_APRA_WK       	–	 work tables 
+Destination Environments
+
+Technical Component	Environment	Server HR
+		
+		
+		
+TERADATA SERVER	SIT07	aup3054s.unix.anz
+DATABASE	SIT07	SIT07
+RSDS SCHEMA	SIT07	DEVD1_RSDS_HIST
+DEVD1_RSDS_HIST_VW
+ADWM SCHEMA	SIT07	
+AUDIT SCHEMA	SIT07	 
+APRA 2.0	SIT07	 
+APRA 2.0 Reference Database 	SIT07	
+
+3	Change Content
+
+3.1	System Functionality
+3.2	Defects
+The following CR will be implemented and fixed within this release:
+3.3	Change Requests
+NA
+3.4	Known Issues
+NA
+3.4.1	Outstanding Defects
+NA
+
+4	Technical Impacts
+The following Technical Impacts anticipated:
+
+
+
+ 
+
+5			Software Component Details
+5.1.1	Code Modifications
+
+Item No.	Solution Component(s)	Item Description	Document
+1.				 
+
+
+ 
+5.1.2	Teradata Database Steps
+The following steps need to be followed to deploy the necessary changes for Teradata components:
+Step No.	Solution Component(s)	Step Description	Related Component
+1.		Create table	Execute  Create Table statements for Consumption layer as part of APRA2.0	
+ 
+2.		Create work tables	Execute  Create Table statements for Consumption layer as part of APRA2.0	 
+3.		Create Views	Execute  Create Views statements for Consumption layer as part of APRA2.0	 
+4.		Create Procedures 	Execute  Create Procedure statements for Consumption layer as part of APRA2.0	 
+5.		Create table	Execute  Create Table statements for Business Rule layer as part of APRA2.0	 
+6.		Create work tables	Execute  Create Table statements for Business Rule layer as part of APRA2.0	 
+7.		Create Views	Execute  Create Views statements for Business Rule layer as part of APRA2.0	 
+8.		Create Procedures 	Execute  Create Procedure statements for Business Rule layer as part of APRA2.0	 
+5.1.3	 Rollback Procedure
+Scripts which were applied as part of this change need to be replaced with backup scripts in case of rollback.
+ 
+5.2	Documentation Modifications
+NA
+5.3	Parameter Modifications
+		NA
+5.5	Database Updates
+6		Delivery Details
+6.1		Deliverable Location:
+All deliverables will be picked up from the following baseline on the LAN for deployment.
+
+
+Component	Baseline
+	
+	
+DB Scripts	
+
+           
+    6.2		Deployment Strategy:
+
+
+
+    6.3		Run Strategy:
+          Execute the Control M Script for Day 0 for Daily Summary first once the RSDS data load is Complete. 
+
+          	
+     6.4	Dependencies
+
+       CSV files generation depends on RSDS data load.
+    References
+NA
+ 
+Document Control
+8.1 Version Control
+Version	Date	Change Description	Author
+1.0	08/03/2016	Initial Draft	Deepak Pathak
+8.2 Acceptance
+This work product is accepted by the Release Manager below:
+Role	Name	Date
+Delivery Lead		
+
+
+	
