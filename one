@@ -1,0 +1,409 @@
+REPLACE	PROCEDURE  QSIT_APRA2_CNSUM_RRP_PGM.CLMD_RTN_VLD
+-- =============================================
+-- AUTHOR             :               DEEPAK PATHAK
+-- CREATE DATE   :               21  MARCH  2015
+-- DESCRIPTION   :               CONSUMPTION LAYER
+-- VERSION            :               1.0V
+-- =============================================
+-- =============================================
+--    Change log
+--  
+-- =============================================
+-- Stored Procedure Parameters
+(
+IN vi_name VARCHAR (32),  
+OUT ov_str VARCHAR(10000),
+OUT ORETURN_CODE                   SMALLINT,             /* 0: SUCCESSFUL*/
+OUT ORETURN_MESSAGE           VARCHAR(100)
+)
+MAIN:
+BEGIN	
+
+-- Declare variables
+DECLARE	v_str VARCHAR(10000);
+DECLARE	oSubReturn_Code             SMALLINT;
+DECLARE	oSubReturn_Message          VARCHAR(1000);
+
+ DECLARE	EOLStr VARCHAR(5);
+ 
+ 
+ SET EOLStr ='
+';
+
+ 
+ SET 	v_str = '';
+--MATCH ALL THE COLUMNS OF A VIEW WITH DBC.COLUMNS TABLE
+L1: 
+FOR	CSR1 AS 
+   SEL 
+cl.ColumnName 
+--clmd.Col_Map_Tgt_Col  
+FROM DBC.COLUMNS cl
+WHERE 
+cl.ColumnName NOT IN
+(SEL clmd.Col_Map_Tgt_Col FROM QSIT_APRA2_CNSUM_RRP_VW.CLMD_Column_Mapping      clmd
+WHERE clmd.Col_Map_View_Name =vi_name
+ OR         clmd.Col_Map_View_Name IS NULL
+)
+AND  cl.TABLENAME  IN
+(
+SEL	DISTINCT clmd.Col_Map_Tgt_Tbl 
+FROM	QSIT_APRA2_CNSUM_RRP_VW.CLMD_Column_Mapping    clmd
+WHERE Col_Map_View_Name = vi_name
+)
+AND cl.DatabaseName = 'QSIT_APRA2_CNSUM_RRP_T' 
+ 
+AND	cl.ColumnName NOT IN ('BSNS_DT','ETL_SRC_VIEW_NM','CR_INT_ACCR','DR_INT_ACCR','SPCL_PRVSN_AMT','RSK_RTNG') 
+AND cl.ColumnName NOT LIKE ('%CSTM%')
+ 
+	 
+DO
+----------
+ 
+	IF	CSR1.ColumnName IS NOT NULL  THEN 
+		SET v_Str =  v_Str ||EOLStr|| TRIM(CSR1.ColumnName)|| ' does not exist in Mapping ';----------
+ ELSE
+ SET v_Str = '';
+				END IF;
+----------
+END FOR	L1;
+
+
+/*IF v_str <>'' THEN
+	SET  ov_str = v_str ;
+	SET	oReturn_Code = 1;
+	SET	oReturn_Message =  'Validation Failed';
+
+ELSE
+	SET	ov_str = 'All Attributes are Present' ;
+	SET	oReturn_Code = 0;
+	SET	oReturn_Message =  'Validation Success';
+	
+	END IF;
+*/
+--MATCH ALL THE COLUMNS OF A VIEW WITH DBC.COLUMNS TABLE
+L2: 
+FOR	CSR1 AS 
+ SEL 
+clmd.Col_Map_Tgt_Col  
+FROM QSIT_APRA2_CNSUM_RRP_VW.CLMD_Column_Mapping    clmd
+WHERE clmd.Col_Map_View_Name   = vi_name
+AND clmd.Col_Map_Tgt_Col NOT IN
+(SEL  cl.ColumnName FROM dbc.COLUMNS    cl
+WHERE cl.TABLENAME = (SELECT Col_Map_Tgt_Tbl FROM QSIT_APRA2_CNSUM_RRP_VW.clmd_column_mapping WHERE Col_Map_View_Name = vi_name GROUP BY 1)
+
+ 
+ AND cl.DatabaseName = 'QSIT_APRA2_CNSUM_RRP_T' 
+ AND	cl.ColumnName NOT IN ('BSNS_DT','ETL_SRC_VIEW_NM') 
+)  AND	clmd.Col_Map_Tgt_Col NOT IN ('CR_INT_ACCR','DR_INT_ACCR','SPCL_PRVSN_AMT','RSK_RTNG') 
+
+	 
+DO
+----------
+ 
+	IF	CSR1.Col_Map_Tgt_Col IS NOT NULL  THEN 
+		SET v_Str = v_Str ||EOLStr||  TRIM(CSR1.Col_Map_Tgt_Col)|| ' does not exist in database';----------------
+ ELSE
+ SET v_Str = '';
+				END IF;
+----------
+END FOR	L2;
+
+
+IF v_str <>'' THEN
+	SET  ov_str = v_str ;
+	SET	oReturn_Code = 1;
+	SET	oReturn_Message =  'Validation Failed';
+
+ELSE
+	SET	ov_str = 'All Attributes are Present' ;
+	SET	oReturn_Code = 0;
+	SET	oReturn_Message =  'Validation Success';
+END IF;	
+
+ 
+END MAIN;
+--------------------------------------------------------------------------------
+
+REPLACE PROCEDURE QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG
+-- =============================================
+-- Description: This procedure will make execute SQL statement and make an entry into log table for both success and failure
+-- Change log
+--      [2015 01 26]: Initial version 
+-- =============================================
+-- Stored Procedure Parameters
+(
+ IN iStrdPrcdr_Nm VARCHAR(255),
+ IN iStep_No SMALLINT,
+ IN iMsg VARCHAR(50000),
+ IN iDebug_Lvl SMALLINT, /* 0  = highest level logging; 5 = verbose level logging */
+ OUT oReturn_Code SMALLINT, /* 0: Successful; Non-Zero: Error */
+ OUT oReturn_Message VARCHAR(1000)
+) 
+MAIN:
+BEGIN
+-- Declare variables
+DECLARE vSQL_Code INTEGER;
+DECLARE vSQL_State VARCHAR(6);
+DECLARE vError_Text VARCHAR(256);
+DECLARE vDebug_Lvl SMALLINT;
+
+-- Error Handler
+DECLARE EXIT HANDLER FOR SQLEXCEPTION
+BEGIN
+    SET vSQL_Code  = SQLCODE;
+    SET vSQL_State = SQLSTATE;
+    GET DIAGNOSTICS EXCEPTION 1 vError_Text = MESSAGE_TEXT;
+    SET oReturn_Code = 2;
+    SET oReturn_Message = ' Call to SP failed. SQL Exception, SQLCODE = '||TRIM(vSQL_Code)||', SQLSTATE = '||vSQL_State||', Error Msg = '||vError_Text;
+END;
+
+-- Select the environment debug level into a variable
+SELECT CAST(PRMTR_VAL AS SMALLINT) INTO vDebug_Lvl FROM QSIT_APRA2_CNSUM_RRP_VW.PRMTR_MSTR WHERE PRMTR_NM = 'DEBUG_LVL';
+
+IF iDebug_Lvl <= vDebug_Lvl THEN  /* ensure that input debug level is greater or equal to env debug level eg. input high & env medium should return true */
+SET oReturn_Code = 0;
+SET oReturn_Message = 'Successfully Completed - Entry made in log table. ';
+INSERT INTO QSIT_APRA2_CNSUM_RRP_WK.CNSUM_LOG (
+       Session_Id,
+       Usid,
+       StrdPrcdr_Nm,
+       Step_No,
+       Msg,
+       Log_Ts
+) VALUES
+(      SESSION,
+        USER,
+        iStrdPrcdr_Nm,
+        iStep_No,
+        iMsg,
+        CURRENT_TIMESTAMP(6)
+);
+ELSE
+SET oReturn_Code = 0;
+SET oReturn_Message = 'Successfully Completed - Entry not made as input debug level was less than environment debug level. ';
+END IF;
+
+END MAIN;
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+
+
+REPLACE	PROCEDURE QSIT_APRA2_CNSUM_RRP_PGM.CLMD_FINAL_PROC 
+-- =============================================
+-- AUTHOR             :               PRALHAD KAMATH
+-- CREATE DATE   :               23  DEC  2015
+-- DESCRIPTION   :               CONSUMPTION LAYER
+-- VERSION            :               1.1V
+-- =============================================
+-- =============================================
+--    Change log
+-- [28 JAN 2016]: Modified to add Error Handeling
+-- [15 Mar 2016]: 1. Enhanced the error message to have more specific information in case of failure. 
+--                          2. Modified the condition to check for any failure condition to AND from OR
+
+--[7th APR 2016]: Added Validation sub procedure to verify all the attributes of  column_mapping table
+--								exists in dbc.tables and vice versa.
+--[12th APR 2016]: Optimize the inline view to select only required columns and not all.
+-- =============================================
+-- Stored Procedure Parameters
+ (IN vi_Name VARCHAR (32), 
+ IN iExec_Mode CHAR(1),
+OUT vo_qryStr VARCHAR(50000),
+OUT ORETURN_CODE                   SMALLINT,             /* 0: SUCCESSFUL */
+OUT ORETURN_MESSAGE                VARCHAR(250))
+MAIN:
+ BEGIN
+ 
+ -- Declare variables
+ DECLARE output_vld VARCHAR(10000);
+ DECLARE output_select VARCHAR(10000);
+ DECLARE output_From VARCHAR(10000);
+ DECLARE output_where VARCHAR(10000);
+ DECLARE v_qryStr VARCHAR(50000);
+ 
+ DECLARE return_code_vld                SMALLINT;
+ DECLARE return_message_vld         VARCHAR(1000);
+  
+ DECLARE return_code_select                 SMALLINT;
+ DECLARE return_message_select          VARCHAR(1000);
+ 
+ DECLARE return_code_from                   SMALLINT;
+ DECLARE return_message_from           VARCHAR(1000);
+ 
+ DECLARE return_code_where                 SMALLINT;
+ DECLARE return_message_where          VARCHAR(1000);
+ 
+ 
+ 
+ DECLARE	EOLStr VARCHAR(5);
+ 
+ 
+ SET EOLStr ='
+';
+ 
+ --CALLING SUB PROCEDURES
+ 
+ CALL QSIT_APRA2_CNSUM_RRP_PGM.CLMD_RTN_VLD(vi_Name, output_vld,return_code_vld, return_message_vld);
+ IF return_code_vld <> 0 THEN
+    SET oReturn_Code = return_code_vld;
+    SET oReturn_Message = 'Validation Portion: ' || output_vld;
+    LEAVE MAIN;
+END IF;
+
+
+ 
+ CALL QSIT_APRA2_CNSUM_RRP_PGM.CLMD_RTN_SELECT(vi_Name, output_select, return_code_select, return_message_select);
+ IF return_code_select <> 0 THEN
+    SET oReturn_Code = return_code_select;
+    SET oReturn_Message = 'SELECT Portion: ' || return_message_select;
+    LEAVE MAIN;
+END IF;
+
+ 
+ CALL QSIT_APRA2_CNSUM_RRP_PGM.CLMD_RTN_FROM(vi_Name, output_From,return_code_from, return_message_from);
+  IF return_code_from <> 0 THEN
+    SET oReturn_Code = return_code_from;
+    SET oReturn_Message = 'FROM Portion: ' || return_message_from;
+    LEAVE MAIN;
+END IF;
+ 
+ 
+ CALL QSIT_APRA2_CNSUM_RRP_PGM.CLMD_RTN_WHERE(vi_Name, output_where,return_code_where, return_message_where);
+  IF return_code_where <> 0 THEN
+    SET oReturn_Code = return_code_where;
+    SET oReturn_Message = 'WHERE Portion: ' || return_message_where;
+    LEAVE MAIN;
+END IF;
+ 
+    IF (return_code_select =0 AND return_code_from = 0 AND return_code_where = 0)
+    THEN
+	SET v_qryStr = output_select ||EOLStr || output_From || EOLStr ||output_where;
+	SET vo_qryStr = v_qryStr;
+	
+	IF iExec_Mode = 'Y' THEN 
+		EXECUTE IMMEDIATE v_qryStr;
+		SET oReturn_Code = 0;
+		SET oReturn_Message='Success - Executed the generated SQL. Please verify that View has been created.';
+		LEAVE MAIN;
+	END IF;
+	SET oReturn_Code = 0;
+	SET oReturn_Message='Success - Did not execute the generated SQL';
+	ELSE
+	SET oReturn_Code = 5;
+	SET oReturn_Message= 'SELECT Portion: ' || COALESCE(return_message_select, '') || EOLStr || 'FROM Portion: ' || COALESCE(return_message_from, '') || EOLStr || 'WHERE Portion: ' || COALESCE (return_message_where, '');
+    END IF;  
+  	
+END;
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+
+
+REPLACE	PROCEDURE QSIT_APRA2_CNSUM_RRP_PGM.CLMD_RTN_INLINE_VIEW (IN vi_name VARCHAR (32), IN vi_tablename VARCHAR(32),  OUT ov_str VARCHAR(1000))
+BEGIN	
+DECLARE	v_str VARCHAR(1000);
+DECLARE	v_Str_Col_List VARCHAR(1000);
+
+DECLARE	EOLStr VARCHAR(500);
+
+SET EOLStr ='
+';
+
+SET v_str = '';
+
+L1: 
+FOR	CSR1 AS 
+SELECT *
+FROM QSIT_APRA2_CNSUM_RRP_VW.CLMD_table_mapping 
+WHERE 
+	Tab_Map_View_Name =   vi_name 
+AND Tab_Map_Src_Tbl = vi_tablename
+DO
+----------
+/* L2 Cursor starts here 
+*/
+
+
+ SET v_Str_Col_List = '';
+ 
+L2: 
+FOR	CSR2 AS 
+
+
+  SELECT 
+ Col_Map_Src_Tbl, Col_Map_Src_Col AS ATTRB
+FROM QSIT_APRA2_CNSUM_RRP_VW.CLMD_Column_Mapping
+WHERE Col_Map_View_Name =vi_name
+AND Col_Map_Type IN ('ColumnMap','StaticLogic')
+AND 
+(Col_Map_Src_Tbl   = vi_tablename )
+--OR Col_Map_Src_Col  = vi_tablename )             
+
+UNION 
+
+SEL Join_Cond_Left_Tbl, Join_Cond_Left_Col FROM QSIT_APRA2_CNSUM_RRP_VW.clmd_join_condition
+WHERE Join_Cond_View_Name =vi_name
+AND Join_Cond_Left_Tbl = vi_tablename
+
+UNION 
+
+SEL Join_Cond_Right_Tbl, Join_Cond_Right_Col FROM QSIT_APRA2_CNSUM_RRP_VW.clmd_join_condition
+WHERE Join_Cond_View_Name =vi_name
+AND Join_Cond_Right_Tbl = vi_tablename
+
+UNION
+
+
+SEL Whr_Tbl, Whr_Col FROM QSIT_APRA2_CNSUM_RRP_VW.CLMD_Whr_Clause
+WHERE view_name  =vi_name
+AND Whr_Tbl = vi_tablename
+
+
+DO
+----------
+ --SET v_str = v_str||  '( SELECT ' ||CSR1.ATTRB||' FROM QSIT_APRA2_CNSUM_RRP_VW.'|| CSR1.Phy_Tbl_Nm ||' WHERE '||EOLStr;
+
+  SET v_Str_Col_List = v_Str_Col_List ||'
+	,' ||CSR2.ATTRB;
+	
+	
+
+----------
+END FOR L2;
+
+
+IF v_Str_Col_List = '' THEN 
+SET v_Str_Col_List ='*' ; END IF; -- will be populated here 
+/* L2 Cursor ends here 
+*/
+--SET v_str = '( SELECT '||v_Str_Col_List||' FROM QSIT_APRA2_CNSUM_RRP_VW.'|| CSR1.Phy_Tbl_Nm ||' WHERE '||EOLStr;
+SET v_str =  '( SELECT 
+ 	'|| SUBSTR(v_Str_Col_List, INDEX(v_Str_Col_List, ',')+1)||' FROM QSIT_APRA2_CNSUM_RRP_VW.'|| CSR1.Phy_Tbl_Nm ||' WHERE ';
+
+CASE CSR1.Tab_Map_Fltr_Typ
+	WHEN 'CL' THEN
+		SET v_str = v_str ||CSR1.Tab_Map_Fltr_Col ||' '||CSR1.Tab_Map_Fltr_Cond || ' 
+		(SELECT CL_CD_ID FROM QSIT_APRA2_CNSUM_RRP_VW.T_CL WHERE CL_SCHM_NM = '''||CSR1.Tab_Map_Schm_Nm||''' AND CL_CD = '''||CSR1.Tab_Map_CL_Cd||''')';
+	WHEN 'RAW' THEN	
+		SET v_str = v_str || CSR1.Tab_Map_Fltr_Crit;
+	WHEN 'AU' THEN 
+		SET v_str = v_str ||
+		'    AR_TO_AU_RL_TY_ID = (SEL CL_CD_ID FROM QSIT_APRA2_CNSUM_RRP_VW.T_CL CL_RL WHERE CL_RL.CL_SCHM_NM = ''AR / AU RLTNP TYPE'' AND CL_RL.CL_CD ='''||CSR1.Tab_Map_AU_RL_Typ ||''')' ||EOLStr||
+		'AND AU_TY_ID          = (SEL CL_CD_ID FROM QSIT_APRA2_CNSUM_RRP_VW.T_CL CL_RL WHERE CL_RL.CL_SCHM_NM = ''ACCOUNTING UNIT TYPE'' AND CL_RL.CL_CD ='''||CSR1.Tab_Map_AU_Typ ||''') '||EOLStr||
+		'AND SCENR_ID          = (SEL CL_CD_ID FROM QSIT_APRA2_CNSUM_RRP_VW.T_CL CL_RL WHERE CL_RL.CL_SCHM_NM = ''SCENARIO'' AND CL_RL.CL_CD ='''||CSR1.Tab_Map_AU_Schm ||''') '||EOLStr||
+		'AND UNT_OF_MSR_ID     = (SEL CL_CD_ID FROM QSIT_APRA2_CNSUM_RRP_VW.T_CL CL_RL WHERE CL_RL.CL_SCHM_NM = ''UNIT OF MEASURE TYPE'' AND CL_RL.CL_CD ='''||CSR1.Tab_Map_AU_Msr ||''') ';
+	ELSE	
+		SET v_str = v_str || '1=1';
+END CASE;		
+
+----------
+END FOR L1;
+
+SET ov_str = v_str || ') AS '|| vi_tablename;
+END;
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+
