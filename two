@@ -1,0 +1,337 @@
+REPLACE	PROCEDURE  QSIT_APRA2_CNSUM_RRP_PGM.CLMD_RTN_FROM 
+-- =============================================
+-- AUTHOR             :               PRALHAD KAMATH
+-- CREATE DATE   :               23  DEC  2015
+-- DESCRIPTION   :               CONSUMPTION LAYER
+-- VERSION            :               1.1V
+-- =============================================
+-- =============================================
+--    Change log
+-- [28 JAN 2016]: Modified to add Error Handeling
+-- =============================================
+-- Stored Procedure Parameters
+(
+IN vi_name VARCHAR (32),  
+OUT ov_str VARCHAR(30000),
+OUT ORETURN_CODE                   SMALLINT,             /* 0: SUCCESSFUL*/
+OUT ORETURN_MESSAGE           VARCHAR(250)
+)
+MAIN:
+BEGIN	
+
+-- Declare variables
+DECLARE	v_str VARCHAR(30000);
+DECLARE	v_Inline_View_Name VARCHAR(1000);
+DECLARE	EOLStr VARCHAR(5);
+DECLARE	v_Left_Str VARCHAR(1000);
+DECLARE	v_Right_Str VARCHAR(1000);
+DECLARE	oSubReturn_Code             SMALLINT;
+DECLARE	oSubReturn_Message          VARCHAR(1000);
+
+-- Error Handler variables
+DECLARE	vSQL_Code                   INTEGER;
+DECLARE	vSQL_State                  VARCHAR(6) DEFAULT ''XC;
+DECLARE	vError_Text                 VARCHAR(1999);
+
+DECLARE	EXIT HANDLER FOR SQLEXCEPTION
+BEGIN	
+	--
+	-- Preserve Diagnostic Codes from errored Statement
+	--
+	SET	vSQL_Code  = SQLCODE;
+	SET	vSQL_State = SQLSTATE;
+	SET	vError_Text = ' ';
+	GET DIAGNOSTICS EXCEPTION 1 vError_Text = MESSAGE_TEXT;
+	SET	oReturn_Code = 1;
+	SET	oReturn_Message = 'SQL Exception, SQLCODE = '||TRIM(vSQL_Code)||', SQLSTATE = '||vSQL_State||', Error Msg = '||vError_Text;
+END;
+
+/* ----------------------------------- Perform Error Checking --------------------------------------------------------------------------------*/
+IF	vi_name NOT IN (
+SELECT	Join_Cond_View_Name 
+FROM	 QSIT_APRA2_CNSUM_RRP_VW.clmd_join_condition WHERE Join_Cond_View_Name = vi_name GROUP BY 1)
+THEN
+	SET	VSQL_CODE  = 5;
+	SET	VSQL_STATE = 1005;  
+	SET	VERROR_TEXT = 'Invalid View Name provided from - FROM statement';
+	--LOG INTO ERROR TABLE
+	INSERT INTO QSIT_APRA2_CNSUM_RRP_VW.Log_Table_CL VALUES (vSQL_Code, vSQL_State, vError_Text, CURRENT_TIMESTAMP);
+END IF	;
+
+SET	EOLStr ='
+';
+
+SET	v_str = 'FROM'||EOLStr;
+
+--LOGIC OF FROM STATEMENT
+L1: 
+FOR	CSR1 AS 
+	SELECT	Join_Cond_View_Name, Join_Cond_Tbl, Join_Cond_Typ,
+	Join_Cond_Left_Tbl, Join_Cond_Left_Col, Join_Cond_Opr, Join_Cond_Right_tbl,
+	Join_Cond_Right_Col, Join_Cond_Col_Lnk, 
+	ROW_NUMBER() OVER (PARTITION BY Join_Cond_View_Name, Join_Cond_Tbl 
+	ORDER	BY Join_Cond_Tbl,Join_Cond_Typ) AS RowNo
+	FROM	QSIT_APRA2_CNSUM_RRP_VW.clmd_join_condition
+	INNER JOIN QSIT_APRA2_CNSUM_RRP_VW.clmd_table_mapping
+	ON	Join_Cond_Tbl = Tab_Map_Src_Tbl 
+	AND	Join_Cond_View_Name = Tab_Map_View_Name
+	WHERE	  Join_Cond_View_Name = vi_name
+	ORDER	BY Tab_Map_Tbl_Seq_No, Join_Cond_Tbl, RowNo
+DO
+----------
+	IF	CSR1.Join_Cond_Typ <> '<BLANK>' AND	CSR1.RowNo=1  THEN 
+		SET v_Str = v_Str || ''||
+		CASE	CSR1.Join_Cond_Typ
+											WHEN 'INNER' THEN 'INNER JOIN'
+											WHEN 'LEFT OUTER' THEN 'LEFT OUTER JOIN'
+											END; 
+	END IF	; -- Add join type
+
+	IF	CSR1.RowNo = 1 THEN 
+		CALL QSIT_APRA2_CNSUM_RRP_PGM.CLMD_RTN_INLINE_VIEW(CSR1.Join_Cond_View_Name, CSR1.Join_Cond_Tbl, v_Inline_View_Name);
+		SET v_str = v_str || v_Inline_View_Name ||EOLStr;
+		ELSE	
+		SET v_Str = v_Str||'AND ';
+	END IF	; -- Add inline view 
+
+	IF	CSR1.Join_Cond_Typ <> '<BLANK>' 
+		AND	CSR1.RowNo=1  THEN 
+		SET v_Str = v_Str ||' ON '; 
+	END IF	; 												
+
+	IF	CSR1.Join_Cond_Typ <> '<BLANK>' THEN 
+		IF COALESCE(CSR1.Join_Cond_Left_Tbl,'') <> '' THEN	
+			SET v_Left_Str = CSR1.Join_Cond_Left_Tbl ||'.'||CSR1.Join_Cond_Left_Col;
+		ELSE 
+			SET v_Left_Str = '';
+		END IF;
+		IF COALESCE(CSR1.Join_Cond_Right_tbl,'') <> '' THEN
+		
+			SET v_Right_Str = CSR1.Join_Cond_Right_tbl||'.'||CSR1.Join_Cond_Right_Col;
+		ELSEIF CSR1.Join_Cond_Right_Col LIKE 'CASE%' THEN
+		    SET v_Right_Str = CSR1.Join_Cond_Right_Col;
+        ELSEIF CSR1.Join_Cond_Right_Col LIKE 'COALESCE%' THEN
+		    SET v_Right_Str = CSR1.Join_Cond_Right_Col;
+		ELSE	
+			SET v_Right_Str = ''''||CSR1.Join_Cond_Right_Col||'''';
+		END IF; 
+	SET v_str = v_Str||v_Left_Str||' '||CSR1.Join_Cond_Opr||' '||v_Right_Str||EOLStr  ;
+		IF CSR1.Join_Cond_Col_Lnk IS NOT NULL THEN
+			SET v_str = v_Str||CSR1.Join_Cond_Col_Lnk;
+		END IF;
+	END IF	; -- Add on clauses
+----------
+END FOR	L1;
+
+--LOG INTO ERROR TABLE
+
+IF vi_name  IN (
+	SELECT	Join_Cond_View_Name 
+	FROM	QSIT_APRA2_CNSUM_RRP_VW.clmd_join_condition
+	WHERE 1 = 1 
+	AND	join_cond_tbl <> '' 
+	AND	join_cond_typ<>'' 
+	AND	join_cond_left_tbl<> ''
+	AND join_cond_left_col<>'' 
+	AND	join_cond_opr <>'' 
+	AND	join_cond_right_tbl<>'' 
+	AND	join_cond_right_col<>''
+	AND Join_Cond_View_Name = vi_name)
+	--where Col_Map_Tgt_Col <> ' ' and Col_Map_Type <> ' ')
+THEN
+	SET	ov_str = v_str ;
+	SET	oReturn_Code = 0;
+	SET	oReturn_Message =  'FROM statement - Success';
+	LEAVE MAIN;
+END IF	;
+
+IF	vi_name  IN (
+	SELECT	Join_Cond_View_Name 
+	FROM	QSIT_APRA2_CNSUM_RRP_VW.clmd_join_condition
+	WHERE  1=1 
+	AND	join_cond_typ='<BLANK>' 
+	AND	join_cond_tbl <> '' 
+	AND	 join_cond_left_tbl= ''
+	AND join_cond_left_col='' 
+	AND	join_cond_opr ='' 
+	AND	join_cond_right_tbl='' 
+	AND join_cond_right_col=''
+	AND Join_Cond_View_Name = vi_name)
+THEN
+SET	ov_str = v_str ;
+	SET	oReturn_Code = 0;
+	SET	oReturn_Message =  'FROM statement - Success';
+	LEAVE MAIN;
+END IF	;
+
+IF vi_name  IN (
+	SELECT	Join_Cond_View_Name 
+	FROM	QSIT_APRA2_CNSUM_RRP_VW.clmd_join_condition
+	WHERE 1 = 1  
+	AND	join_cond_typ<>'<BLANK>' 
+	AND	join_cond_tbl <> '' 
+	AND	
+	( join_cond_left_tbl= '' 
+	OR	join_cond_left_col='' 
+	OR	join_cond_opr ='' 
+	OR	join_cond_right_tbl='' 
+	OR join_cond_right_col='')
+	AND Join_Cond_View_Name = vi_name)
+THEN
+	INSERT INTO QSIT_APRA2_CNSUM_RRP_VW.Log_Table_CL VALUES (vSQL_Code, vSQL_State, vError_Text, CURRENT_TIMESTAMP);
+	SET oReturn_Code = 20;
+	SET oReturn_Message = 'Either of the input attributes is Blank - FROM statement';
+	LEAVE MAIN;
+END IF	;
+END MAIN;
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+
+
+REPLACE	PROCEDURE QSIT_APRA2_CNSUM_RRP_PGM.CLMD_RTN_WHERE
+-- =============================================
+-- AUTHOR             :               PRALHAD KAMATH
+-- CREATE DATE   :               23  DEC  2015
+-- DESCRIPTION   :               CONSUMPTION LAYER
+-- VERSION            :               1.1V
+-- =============================================
+-- =============================================
+--    Change log
+-- [28 JAN 2016]: Modified to add Error Handeling
+-- [23 Mar 2016]: Fixed it to append a single quotes to each token if multiple comma separated values are passed in Criteria field
+-- (31 Marc 2016): Added condition to handle no values in where table
+-- =============================================
+-- Stored Procedure Parameters
+(
+IN vname VARCHAR (32), 
+OUT o_count VARCHAR(1000),
+OUT ORETURN_CODE                   SMALLINT,             /* 0: SUCCESSFUL*/
+OUT ORETURN_MESSAGE                VARCHAR(250)
+)
+MAIN:
+BEGIN	
+-- Declare variables
+DECLARE	v_str VARCHAR(1000);
+DECLARE	SqlStr VARCHAR(500);
+DECLARE oSubReturn_Code             SMALLINT;
+DECLARE oSubReturn_Message          VARCHAR(1000);
+-- Error Handler variables
+DECLARE	vSQL_Code                   INTEGER;
+DECLARE	vSQL_State                  VARCHAR(6) DEFAULT ''XC;
+DECLARE	vError_Text                 VARCHAR(1999);
+DECLARE vWhr_Crit VARCHAR(1000) DEFAULT '';
+DECLARE vCnt SMALLINT DEFAULT 0;
+DECLARE	vCOUNT                   INTEGER;
+
+DECLARE	EXIT HANDLER FOR SQLEXCEPTION
+BEGIN	
+	--
+	-- Preserve Diagnostic Codes from errored Statement
+	--
+	SET	vSQL_Code  = 0;
+	SET	vSQL_State = 0;
+	SET	vError_Text = ' ';
+	GET DIAGNOSTICS EXCEPTION 1 vError_Text = MESSAGE_TEXT;
+
+	SET	oReturn_Code = 1;
+	SET	oReturn_Message = 'SQL Exception, SQLCODE = '||TRIM(vSQL_Code)||', SQLSTATE = '||vSQL_State||', Error Msg = '||vError_Text;
+END;
+
+/* ----------------------------------- Perform Error Checking --------------------------------------------------------------------------------*/
+
+/*******************NO DATA IN WHERE STARTS***************************/
+SELECT	COUNT(*) INTO :vCOUNT
+FROM	QSIT_APRA2_CNSUM_RRP_VW.CLMD_Whr_Clause 
+WHERE View_Name = vname;
+		
+IF	vCOUNT = 0 
+	THEN
+		SET	o_count = 'WHERE  1=1'||';';
+	    SET	oReturn_Code = 0;
+		SET	oReturn_Message = 'No where condition mentioned';
+		LEAVE MAIN;
+END IF	;
+
+/*******************NO DATA IN WHERE ENDS***************************/
+
+SET	v_str = '';
+--LOGIC OF WHERE STATEMENT
+L1: 
+FOR	CSR1 AS 
+	SELECT Whr_Tbl, Whr_Col, Whr_Join, Whr_Crit  --Whr_Tbl||'.'||Whr_Col||' '||Whr_Join||' '''||Whr_Crit||'''' AS WHR
+	FROM QSIT_APRA2_CNSUM_RRP_VW.CLMD_Whr_Clause 
+	WHERE	View_Name =   vname
+	GROUP BY 1, 2, 3, 4
+	ORDER BY 1, 2, 3, 4
+
+
+ DO
+----------
+SET vCnt = 1;
+SET vWhr_Crit = '';
+L2:
+WHILE STRTOK(CSR1.Whr_Crit, ',', vCnt) IS NOT NULL DO
+BEGIN
+	
+	SET vWhr_Crit = vWhr_Crit || CASE WHEN vCnt = 1 THEN '' ELSE ''',''' end || TRIM(STRTOK(CSR1.Whr_Crit, ',', vCnt));
+	SET vCnt = vCnt + 1;
+
+END;
+END WHILE L2;
+IF  (CSR1.Whr_Col<>CSR1.Whr_Crit)  THEN									--	Added Logic for Inline View
+SET	v_str = v_str ||'AND '||CSR1.Whr_Tbl||'.'||CSR1.Whr_Col||' '||CSR1.Whr_Join||' ('''||vWhr_Crit||''')'||'
+';
+
+ELSE 
+SET v_str = v_str ;
+END IF;
+---------
+END FOR	L1;
+
+IF	vname   IN (
+	SELECT	COALESCE (View_Name, '') 
+	FROM	QSIT_APRA2_CNSUM_RRP_VW.CLMD_Whr_Clause
+	WHERE	1=1 
+	AND	Whr_Tbl<>'' 
+	AND	Whr_Col<>'' 
+	AND	Whr_Join<>'' 
+	AND	Whr_Crit<>''
+--	AND TRIM(Whr_Col) <> TRIM(Whr_Crit)
+	AND View_Name = vname
+	GROUP BY 1)
+THEN
+	SET	o_count = 'WHERE  1=1
+	'|| v_str||'  ;';
+
+	IF vname   IN (
+		SELECT	COALESCE (View_Name, '') 
+		FROM	QSIT_APRA2_CNSUM_RRP_VW.CLMD_Whr_Clause
+		WHERE 1=1 
+		AND	(Whr_Tbl='' 
+		OR	Whr_Col='' 
+		OR	Whr_Join='' 
+		OR	Whr_Crit='')
+		AND View_Name = vname
+		GROUP BY 1)
+		THEN
+		SET VSQL_CODE  = 20;
+		SET VSQL_STATE = 1020;  
+		SET VERROR_TEXT ='Either of the input attributes is Blank - WHERE statement';
+
+		INSERT INTO QSIT_APRA2_CNSUM_RRP_VW.Log_Table_CL VALUES (vSQL_Code, vSQL_State, vError_Text, CURRENT_TIMESTAMP);
+
+		SET oReturn_Code = 20;
+		SET oReturn_Message ='Either of the input attributes is Blank - WHERE statement';
+		LEAVE MAIN;
+	END IF;
+ELSE	
+	SET	oReturn_Message = 'Invalid View Name provided from WHERE statement';
+	LEAVE MAIN;
+END IF	;
+
+SET	oReturn_Code = 0;
+SET	oReturn_Message = 'WHERE Statement - Success';
+END MAIN;
+--------------------------------------------------------------------------------
+
