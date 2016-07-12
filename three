@@ -1,0 +1,811 @@
+REPLACE PROCEDURE QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_WRAPPER
+(
+IN SrcTableName VARCHAR (1280),
+IN TgtTableName VARCHAR (1280),
+OUT oReturn_Code SMALLINT, 
+OUT oReturn_Message VARCHAR(1000)
+
+)
+
+MAIN:
+BEGIN
+
+DECLARE vTgtTableName VARCHAR(255) DEFAULT '';
+DECLARE vSrcTableName VARCHAR(255) DEFAULT '';
+DECLARE vSQL_Text VARCHAR(10000) DEFAULT '';
+DECLARE vSQL_Text1 VARCHAR(10000) DEFAULT '';
+
+DECLARE cLF CHAR(2) DEFAULT '0A'XC;
+DECLARE vComma CHAR(1);
+DECLARE vActivityCount INTEGER DEFAULT -99;
+
+-- Error Handler variables
+DECLARE oSubReturn_Code INTEGER;
+DECLARE oSubReturn_Message VARCHAR(1000);
+DECLARE vSQL_Code INTEGER;
+DECLARE vSQL_State VARCHAR(6);
+DECLARE vError_Text VARCHAR(256);
+
+-- Error Handler
+DECLARE EXIT HANDLER FOR SQLEXCEPTION
+BEGIN
+    SET vSQL_Code  = SQLCODE;
+    SET vSQL_State = SQLSTATE;
+    GET DIAGNOSTICS EXCEPTION 1 vError_Text = MESSAGE_TEXT;
+    SET oReturn_Code = 2;
+    SET oReturn_Message = ' Call to SP failed. SQL Exception, SQLCODE = '||TRIM(vSQL_Code)||', SQLSTATE = '||vSQL_State||', Error Msg = '||vError_Text;
+END;
+ 
+ 
+SET vTgtTableName = TgtTableName;
+SET vSrcTableName = SrcTableName;
+
+CALL QSIT_APRA2_CNSUM_RRP_PGM.LOAD_CNSUM_TABLES (vSrcTableName,vTgtTableName,'Y',oSubReturn_Code,oSubReturn_Message,vSQL_Text);
+
+IF oSubReturn_Code <> 0 THEN
+    SET oReturn_Code = oSubReturn_Code;
+    SET oReturn_Message = oSubReturn_Message;
+    SET vSQL_Text1 = 'UPDATE QSIT_APRA2_CNSUM_RRP_T.TEMP_ACF SET JOB_STS = ''F'' , SESSIONID=''0'' WHERE JOB_NM = '''||vSrcTableName||''' and run_dt = ( sel end_ts from QSIT_APRA2_CNSUM_RRP_T.T_APRA_RPT_PRd)'; 
+	LEAVE MAIN;
+END IF;
+
+IF oSubReturn_Code = 0 THEN
+	SET vSQL_Text1 = 'UPDATE QSIT_APRA2_CNSUM_RRP_T.TEMP_ACF SET JOB_STS = ''S''  ,SESSIONID=''0'' WHERE JOB_NM = '''||vSrcTableName||''' and run_dt = ( sel end_ts from QSIT_APRA2_CNSUM_RRP_T.T_APRA_RPT_PRd)'; 
+
+END IF;
+
+CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('Run wrapper proc', 600, 'updateSQL'||vSQL_Text1, 0, oSubReturn_Code, oSubReturn_Message);
+
+EXECUTE IMMEDIATE vSQL_Text1;
+
+SET vActivityCount = ACTIVITY_COUNT;
+CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('Run Wrapper Proc', 600, 'Update SQL. Activity Count = ' ||  vActivityCount, 0, oSubReturn_Code, oSubReturn_Message);
+
+IF oSubReturn_Code <> 0 THEN
+    SET oReturn_Code = oSubReturn_Code;
+    SET oReturn_Message = oSubReturn_Message;
+    LEAVE MAIN;
+END IF;
+
+SET vSQL_Text1 = 'UPDATE QSIT_APRA2_CNSUM_RRP_T.TEMP_ACF SET SESSIONID = SESSIONID - 1 WHERE   JOB_STS = ''P'' AND run_dt = ( sel end_ts from QSIT_APRA2_CNSUM_RRP_T.T_APRA_RPT_PRd)  '; 
+CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('Run wrapper proc', 700, 'updateSQL'||vSQL_Text1, 0, oSubReturn_Code, oSubReturn_Message);
+
+EXECUTE IMMEDIATE vSQL_Text1;
+
+SET vActivityCount = ACTIVITY_COUNT;
+CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('Run Wrapper Proc', 700, 'Update SQL. Activity Count = ' ||  vActivityCount, 0, oSubReturn_Code, oSubReturn_Message);
+
+IF oSubReturn_Code <> 0 THEN
+    SET oReturn_Code = oSubReturn_Code;
+    SET oReturn_Message = oSubReturn_Message;
+    LEAVE MAIN;
+END IF;
+
+END MAIN;
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+
+REPLACE	PROCEDURE QSIT_APRA2_CNSUM_RRP_PGM.CLMD_RTN_SELECT 
+-- =============================================
+-- AUTHOR             :               PRALHAD KAMATH
+-- CREATE DATE   :               23  DEC  2015
+-- DESCRIPTION   :               CONSUMPTION LAYER
+-- VERSION            :               1.1V
+-- =============================================
+-- =============================================
+--    Change log
+-- [28 JAN 2016]: Modified to add Error Handeling
+-- =============================================
+-- Stored Procedure Parameters
+(
+IN vname VARCHAR (32), 
+OUT o_count VARCHAR(10000),
+OUT ORETURN_CODE                   SMALLINT,             /* 0: SUCCESSFUL */
+OUT ORETURN_MESSAGE           VARCHAR(250)
+)
+MAIN:
+BEGIN	
+
+-- Declare variables
+DECLARE	v_str VARCHAR(10000);
+DECLARE	SqlStr VARCHAR(500);
+DECLARE oSubReturn_Code             SMALLINT;
+DECLARE oSubReturn_Message          VARCHAR(1000);
+
+-- Error Handler variables
+DECLARE vSQL_Code                   INTEGER;
+DECLARE vSQL_State                  VARCHAR(6) DEFAULT ''XC;
+DECLARE vError_Text                 VARCHAR(1999);
+
+DECLARE EXIT HANDLER FOR SQLEXCEPTION
+BEGIN
+	--
+	-- Preserve Diagnostic Codes from errored Statement
+	--
+	SET vSQL_Code  = 0;
+	SET vSQL_State =  0;
+	SET vError_Text = ' ';
+	GET DIAGNOSTICS EXCEPTION 1 vError_Text = MESSAGE_TEXT;
+
+	SET oReturn_Code = 1;
+	SET oReturn_Message = 'SQL Exception, SQLCODE = '||TRIM(vSQL_Code)||', SQLSTATE = '||vSQL_State||', Error Msg = '||vError_Text;
+END;
+
+/* ----------------------------------- Perform Error Checking --------------------------------------------------------------------------------*/
+
+IF COALESCE (vname, '') NOT IN (SELECT Col_Map_View_Name FROM QSIT_APRA2_CNSUM_RRP_VW.CLMD_Column_Mapping WHERE Col_Map_View_Name = vname GROUP BY 1)
+THEN
+	SET VSQL_CODE  = 5;
+	SET VSQL_STATE = 1005;  
+	SET VERROR_TEXT = 'Invalid View Name provided from - SELECT statement';
+	--LOG INTO ERROR TABLE
+	INSERT INTO QSIT_APRA2_CNSUM_RRP_VW.Log_Table_CL VALUES (vSQL_Code, vSQL_State, vError_Text, CURRENT_TIMESTAMP);
+END IF;
+
+SET v_str = '';
+
+--LOGIC OF SELECT STATEMENT
+L1: 
+FOR	CSR1 AS 
+	SELECT	CASE Col_Map_Type             
+	WHEN 'StaticLogic' 
+	THEN Col_Map_Fmt
+	WHEN 'ColumnMap' 
+	THEN TRIM(Col_Map_Src_Tbl) ||'.'||TRIM(Col_Map_Src_Col)
+	WHEN 'StaticVal' 
+	THEN ''''||Col_Map_Fmt||''''
+	WHEN 'NullMap' 
+	THEN 'NULL'
+	END AS ATTRB ,
+	Col_Map_Tgt_Col ,
+	Col_Map_Comment
+	FROM QSIT_APRA2_CNSUM_RRP_VW.CLMD_Column_Mapping   
+	WHERE	Col_Map_View_Name = vname
+DO
+	----------
+	SET v_str = v_str ||'
+	,' ||CSR1.ATTRB||' AS ' || CSR1.Col_Map_Tgt_Col ;
+
+	IF COALESCE(CSR1.Col_Map_Comment,'') <> '' THEN
+		SET v_str = v_str || '          --'||CSR1.Col_Map_Comment;
+	END IF;
+
+	----------
+END FOR L1;
+
+-- --LOG INTO ERROR TABLE
+IF COALESCE (vname, '')  IN (SELECT Col_Map_View_Name FROM QSIT_APRA2_CNSUM_RRP_VW.CLMD_Column_Mapping
+WHERE Col_Map_Tgt_Col <> ' ' AND Col_Map_Type <> ' ' AND Col_Map_View_Name = vname)
+THEN
+	SET o_count = 'REPLACE VIEW QSIT_APRA2_CNSUM_RRP_GEN_VW.'||vname ||
+	' AS 
+	LOCKING ROW FOR ACCESS
+	SELECT 
+	'|| SUBSTR(v_str, INDEX(v_str, ',')+1);
+	SET oReturn_Code = 0;
+	SET oReturn_Message =  'Select statement - Success';
+	LEAVE MAIN;
+
+	IF COALESCE (vname, '')  IN (SELECT Col_Map_View_Name FROM QSIT_APRA2_CNSUM_RRP_VW.CLMD_Column_Mapping
+	WHERE 1=1 AND (Col_Map_Tgt_Col = '' OR Col_Map_Type = '') AND Col_Map_View_Name = vname)
+	THEN
+		SET VSQL_CODE  = 20;
+		SET VSQL_STATE = 1020;  
+		SET VERROR_TEXT =  'Either Attribute Col_Map_Tgt_Col or Col_Map_Type is Blank - Select statement';
+		INSERT INTO QSIT_APRA2_CNSUM_RRP_VW.Log_Table_CL VALUES (vSQL_Code, vSQL_State, vError_Text, CURRENT_TIMESTAMP);
+		SET oReturn_Code = 20;
+		SET oReturn_Message = 'Either Attribute Col_Map_Tgt_Col or Col_Map_Type is Blank - Select statement';
+		LEAVE MAIN;
+	ELSE 
+		SET oReturn_Code = 30;
+		SET oReturn_Message = 'Check Log_Table_CL for error';
+		LEAVE MAIN;
+	END IF;
+END IF;
+END MAIN;
+--------------------------------------------------------------------------------
+
+REPLACE PROCEDURE QSIT_APRA2_CNSUM_RRP_PGM.CLMD_DATA_MGRT(vName Varchar(100))
+
+BEGIN
+
+IF  vName <> ''
+
+THEN
+DELETE FROM QSIT_APRA2_CNSUM_RRP_VW.CLMD_Column_Mapping_DP
+WHERE Col_Map_View_Name = vName;
+
+
+INSERT INTO QSIT_APRA2_CNSUM_RRP_VW.CLMD_Column_Mapping_DP
+SEL* FROM SIT07_CNSUM_RRP_VW.CLMD_Column_Mapping
+WHERE Col_Map_View_Name = vName;
+
+ELSE
+
+DELETE FROM QSIT_APRA2_CNSUM_RRP_VW.CLMD_Column_Mapping_DP; 
+
+
+INSERT INTO QSIT_APRA2_CNSUM_RRP_VW.CLMD_Column_Mapping_DP
+SEL* FROM SIT07_CNSUM_RRP_VW.CLMD_Column_Mapping; 
+
+END IF;
+
+END;
+--------------------------------------------------------------------------------
+
+REPLACE PROCEDURE QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_CREATE_OUT_VIEWS
+-- =============================================
+-- Description: This procedure will create custom field enhancement view
+-- Change log
+--      [2016 04 07]: Initial version 
+-- =============================================
+-- Stored Procedure Parameters
+
+(
+IN isrc_tblnm VARCHAR(40),
+IN iExec_Mode CHAR(1),
+OUT oReturn_Code SMALLINT, /* 0: Successful; Non-Zero: Error */
+OUT oReturn_Message VARCHAR(1000),
+OUT oSQL_Text VARCHAR(50000)
+) 
+ MAIN:
+BEGIN
+-- Declare variables
+DECLARE vSQL_Code INTEGER;
+DECLARE vSQL_State VARCHAR(6);
+DECLARE vError_Text VARCHAR(256);
+--DECLARE vSQL_Text CHARACTER LARGE OBJECT ;
+DECLARE vSQL_Text VARCHAR(8000);
+DECLARE vSQL_Text1 VARCHAR(10000);
+DECLARE vSQL_Text2 VARCHAR(10000);
+DECLARE vSQL_Text3 VARCHAR(10000);
+DECLARE vSQL_ONText VARCHAR(10000);
+DECLARE EOLStr VARCHAR(2) ;
+DECLARE oSubReturn_Code INTEGER;
+DECLARE oSubReturn_Message VARCHAR(1000);
+DECLARE vLoopCount INTEGER;
+DECLARE vComma CHAR(1);
+DECLARE vSRC_DB_NM VARCHAR(40);
+DECLARE vTRG_DB_NM VARCHAR(40);
+DECLARE vSRC_DB VARCHAR(40);
+DECLARE VSRC_TBNM VARCHAR(40);
+DECLARE VTGT_TBNM VARCHAR(40);
+DECLARE STRCOUNT INTEGER;
+DECLARE STRVAR INTEGER;
+DECLARE VAL INTEGER;
+DECLARE INDEXVAL INTEGER;
+DECLARE INDVAL INTEGER;
+DECLARE ASVAL INTEGER;
+DECLARE cLF   CHAR(2) DEFAULT '0A'XC;
+--DECLARE return_code_create SMALLINT;
+
+-- Error Handler
+DECLARE EXIT HANDLER FOR SQLEXCEPTION
+BEGIN
+    SET vSQL_Code  = SQLCODE;
+    SET vSQL_State = SQLSTATE;
+    GET DIAGNOSTICS EXCEPTION 1 vError_Text = MESSAGE_TEXT;
+    SET oReturn_Code = 2;
+    SET oReturn_Message = ' Call to SP failed. SQL Exception, SQLCODE = '||TRIM(vSQL_Code)||', SQLSTATE = '||vSQL_State||', Error Msg = '||vError_Text;
+END;
+
+CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('CNSUM_CREATE_OUT_VIEWS', 0, 'Started - isrc_tblnm '||isrc_tblnm, 0, oSubReturn_Code, oSubReturn_Message);
+
+SET EOLStr    = '';
+
+SET vSQL_Text = '';
+SET vSQL_ONText = '';
+SET vLoopCount = 0;
+
+SET vSRC_TBNM = UPPER(isrc_tblnm);
+SET vTGT_TBNM = 'OUT_'||vSRC_TBNM;
+
+
+-- Fetch Source DB Name
+SELECT PRMTR_VAL INTO :vSRC_DB_NM FROM QSIT_APRA2_CNSUM_RRP_VW.PRMTR_MSTR  WHERE PRMTR_NM = 'SRC_CNSUM';
+-- Fetch Target DB Name
+SELECT TRIM(PRMTR_VAL) INTO :vTRG_DB_NM FROM QSIT_APRA2_CNSUM_RRP_VW.PRMTR_MSTR WHERE PRMTR_NM = 'CNSUM_GEN' ;
+
+
+
+CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('CNSUM_CREATE_OUT_VIEWS', 100, 'Source DB Name =' || vSRC_DB_NM||'Target DB Name =  '|| vTRG_DB_NM||' Source Table Name = '|| vSRC_TBNM||' Target Table Name = ', 2, oSubReturn_Code, oSubReturn_Message);
+
+SET vSQL_Text = 'REPLACE VIEW '||vTRG_DB_NM||'.'||vTGT_TBNM||' AS LOCKING ROW FOR ACCESS  '||cLF||'SELECT';
+
+L1: 
+FOR    CSR1 AS
+---Cursor to select the columns.
+
+SELECT TRIM(COLUMNNAME) AS COLNM
+FROM DBC.COLUMNS 
+WHERE Databasename = vSRC_DB_NM 
+AND TRIM(TABLENAME) = vSRC_TBNM
+AND COLNM NOT LIKE '%CSTM%FLD%'
+ORDER BY 1
+
+
+
+DO
+----------
+SET vLoopCount = vLoopCount + 1;
+
+IF vLoopCount = 1 THEN
+    SET vComma = '';
+ELSE 
+    SET vComma = ',';
+END IF;
+
+CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('CNSUM_CREATE_OUT_VIEWS', 200, 'In looop L1 CSR1.COLUMNNAME '|| CSR1.COLNM,3, oSubReturn_Code, oSubReturn_Message);
+
+--SET vSQL_Text = vSQL_Text || EOLStr||CSR1.COLNM||vComma;
+SET vSQL_Text = vSQL_Text || EOLStr||vComma||CSR1.COLNM||cLF;
+
+CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('CNSUM_CREATE_OUT_VIEWS', 300, 'vSQL_Text '|| vSQL_Text, 3, oSubReturn_Code, oSubReturn_Message);    
+
+----------
+END FOR    L1;
+
+L2: 
+FOR    CSR2 AS
+-- CURSOR TO SELECT THE CASE STATEMENTS
+
+SELECT
+GEN_COL
+FROM
+(SELECT
+Col_Map_Tgt_Col,
+ OREPLACE (Col_Map_Tgt_Col,'_MDID',' ') AS Col_Map_Tgt_Col_1,
+ 
+OTRANSLATE (Col_Map_Fmt,'!@#$/%^&*().-',' ') X, -- to remove the junk characters 
+ OREPLACE (X,' ','_') COL_MAP_VAL,
+  
+    'CASE  WHEN ' AS A,
+    Col_Map_Tgt_Col AS B,
+    '= ' AS C,
+    Col_Map_Fmt AS D,
+    ' THEN ' AS E,
+    Col_Map_Tgt_Col_1 AS F,
+    ' ELSE  NULL  END' AS G,
+    ' AS ' AS H,
+    COL_MAP_VAL AS I,
+    CLF||'('||A||B||C||''''||D||''''||E||F||G||')'||H||I AS GEN_COL
+	FROM
+(SELECT
+	DISTINCT Col_Map_Fmt,
+    Col_Map_Tgt_Col  
+    FROM QSIT_APRA2_CNSUM_RRP_VW.CLMD_COLUMN_MAPPING 
+    WHERE COL_MAP_TYPE = 'STATICVAL'
+    AND Col_Map_Tgt_Col LIKE '%CSTM%FLD%MDID%'
+	AND Col_Map_Fmt <> ' ' 
+	AND Col_Map_Tgt_Tbl = isrc_tblnm
+	) Tab) Tab1
+ORDER BY COL_MAP_VAL
+DO
+----------
+
+SET vLoopCount = vLoopCount + 1;
+
+IF vLoopCount = 1 THEN
+    SET vComma = '';
+ELSE 
+    SET vComma = ',';
+END IF;
+
+
+SET vSQL_Text = vSQL_Text ||vComma||CSR2.GEN_COL;
+
+--CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('CNSUM_CREATE_OUT_VIEWS', 400, 'vSQL_Text '|| vSQL_Text, 3, oSubReturn_Code, oSubReturn_Message);    
+
+----------
+END FOR    L2;
+
+/* CODING to add LCY  STARTS FROM HERE */
+
+SET STRCOUNT=CHAR_LENGTH(vSQL_Text) - CHAR_LENGTH(OTRANSLATE(vSQL_Text,',',''))  ;
+SET STRCOUNT=STRCOUNT+1;
+SET  vSQL_Text1='';
+SET  vSQL_Text2='';
+SET STRVAR=1;
+
+WHILE (STRVAR <=STRCOUNT)
+DO
+BEGIN
+ SET vSQL_Text1=STRTOK(vSQL_Text,',',STRVAR);
+SET VAL=INDEX(vSQL_Text1,'BAL_AMT');
+SET INDEXVAL=INDEX(vSQL_Text1,'INT_ACCRUED');
+SET INDVAL=INDEX(vSQL_Text1,'AMT');
+
+IF  ( VAL  >= 1  OR INDEXVAL  >= 1  OR INDVAL >=1  )
+THEN
+		SET ASVAL=INDEX(vSQL_Text1,' AS ');
+		
+		IF ( ASVAL >= 1)
+		THEN
+
+				SET  vSQL_Text1 = SUBSTR(vSQL_Text1, INSTR(vSQL_Text1,' ',-1) + 1);
+				 SET vSQL_Text3 = 'lcy_'||vSQL_Text1;
+				 SET vSQL_Text1 = 'ccy.rte*'||vSQL_Text1;
+				 SET vSQL_Text3 = vSQL_Text1||' AS '||vSQL_Text3;
+				SET vSQL_Text2 = vSQL_Text2||','||vSQL_Text3||cLF;
+				SET STRVAR = STRVAR+1;				
+		ELSE 
+				 SET vSQL_Text3 = 'lcy_'||vSQL_Text1;
+				 SET vSQL_Text1 = 'ccy.rte*'||vSQL_Text1;
+				 SET vSQL_Text3 = vSQL_Text1||' AS '||vSQL_Text3;
+				SET vSQL_Text2 = vSQL_Text2||','||vSQL_Text3;
+				SET STRVAR = STRVAR+1;
+		END IF ;
+
+ELSE
+		SET STRVAR = STRVAR+1;
+
+END IF;
+
+END;
+
+END WHILE;
+
+IF  ( VAL  >= 1  OR INDEXVAL  >= 1  OR INDVAL >=1  )
+THEN
+		SET vSQL_Text=vSQL_Text||vSQL_Text2;
+		SET vSQL_Text = vSQL_Text||EOLStr||' FROM  '||vSRC_DB_NM||'.'||vSRC_TBNM||'  '||vSRC_TBNM||cLF;
+		SET vSQL_Text =vSQL_Text||' LEFT OUTER JOIN ( SEL FR_CUR_CD , RTE FROM  '||vSRC_DB_NM||'.CUR_RTE ) CCY'||CLF||'  ON CCY.FR_CUR_CD = '||vSRC_TBNM||'.CUR_CD'||EOLStr||';';
+		SET oSQL_Text = vSQL_Text;
+		CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('CNSUM_CREATE_OUT_VIEWS', 500, 'vSQL_Text '|| vSQL_Text, 3, oSubReturn_Code, oSubReturn_Message);    
+ELSE
+
+		SET vSQL_Text=vSQL_Text||vSQL_Text2;
+		SET vSQL_Text = vSQL_Text||EOLStr||' FROM  '||vSRC_DB_NM||'.'||vSRC_TBNM||'  '||vSRC_TBNM;
+		SET oSQL_Text = vSQL_Text;
+		CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('CNSUM_CREATE_OUT_VIEWS', 500, 'vSQL_Text '|| vSQL_Text, 3, oSubReturn_Code, oSubReturn_Message);    
+
+END IF;
+/* CODING to add LCY ends  HERE */
+SET oReturn_Code = 0;
+SET oReturn_Message = 'Successfully Completed ';
+
+CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('CNSUM_CREATE_OUT_VIEWS', 600, 'Ended SP - isrc_tblnm '||vSRC_TBNM || 'oSQL_Text:'||oSQL_Text, 0, oSubReturn_Code, oSubReturn_Message);
+
+IF (oSubReturn_Code =0)
+THEN
+
+---To run the SQL generated.	
+	IF iExec_Mode = 'Y' THEN 
+			EXECUTE IMMEDIATE vSQL_Text;
+			SET oReturn_Code = 0;
+			SET oReturn_Message='Success - Executed the generated SQL. Please verify that View has been created.';
+			LEAVE MAIN;
+	END IF;
+	SET oReturn_Code = 0;
+	SET oReturn_Message='Success - Did not execute the generated SQL';
+	ELSE
+	SET oReturn_Code = 5;
+	SET oReturn_Message= 'SELECT Portion: ' || oSubReturn_Message;
+    END IF; 
+
+END MAIN;
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+
+
+REPLACE PROCEDURE QSIT_APRA2_CNSUM_RRP_PGM.LOAD_CNSUM_TABLES
+-- Description: This Stored Procedure will generate the INSERT SELECT QUERY for TgtTableName based on SrcTableName.
+--      [2016 03 16]: Initial version 
+-- =============================================
+-- Stored Procedure Parameters
+(
+IN SrcTableName VARCHAR (128),
+IN TgtTableName VARCHAR (128),
+IN iExec_Mode CHAR(1),
+OUT oReturn_Code SMALLINT, /* 0: Successful; Non-Zero: Error */
+OUT oReturn_Message VARCHAR(1000),
+OUT oSQL_Text VARCHAR(10000)
+)
+
+MAIN:
+BEGIN
+
+DECLARE vTgtTableName VARCHAR(255) DEFAULT '';
+DECLARE vTempDatabaseName VARCHAR(255) DEFAULT '';
+DECLARE vSrcTableName VARCHAR(255) DEFAULT '';
+DECLARE vSrcDatabaseName VARCHAR(255) DEFAULT '';
+DECLARE vTgtDatabaseName  VARCHAR(255) DEFAULT '';
+DECLARE vReportingPeriodDatabaseName VARCHAR(255) DEFAULT '';
+DECLARE vReportingPeriodTableName VARCHAR(255) DEFAULT '';
+DECLARE vTgt_Tbl VARCHAR(255) DEFAULT '' ;
+DECLARE vTemp_DB VARCHAR(255) DEFAULT '';
+DECLARE vTgt_DB VARCHAR(255) DEFAULT '';
+DECLARE vSrc_Tbl VARCHAR(255) DEFAULT '';
+DECLARE vSrc_DB VARCHAR(255) DEFAULT '';
+DECLARE vRep_Tbl VARCHAR(255) DEFAULT '';
+DECLARE vRep_DB VARCHAR(255) DEFAULT '';
+DECLARE vSQL_Text1 VARCHAR(10000) DEFAULT '';
+DECLARE vSQL_Text2 VARCHAR(10000) DEFAULT '';
+DECLARE vSQL_Text3 VARCHAR(10000) DEFAULT '';
+DECLARE vSQL_Text4 VARCHAR(10000) DEFAULT '';
+DECLARE vSQL_Text VARCHAR(40000) DEFAULT '';
+DECLARE vActivityCount INTEGER DEFAULT -99;
+DECLARE cLF CHAR(2) DEFAULT '0A'XC;
+DECLARE vLoopCount INTEGER;
+DECLARE vComma CHAR(1);
+
+-- Error Handler variables
+DECLARE oSubReturn_Code INTEGER;
+DECLARE oSubReturn_Message VARCHAR(1000);
+DECLARE vSQL_Code INTEGER;
+DECLARE vSQL_State VARCHAR(6);
+DECLARE vError_Text VARCHAR(256);
+
+-- Error Handler
+DECLARE EXIT HANDLER FOR SQLEXCEPTION
+BEGIN
+    SET vSQL_Code  = SQLCODE;
+    SET vSQL_State = SQLSTATE;
+    GET DIAGNOSTICS EXCEPTION 1 vError_Text = MESSAGE_TEXT;
+    SET oReturn_Code = 2;
+    SET oReturn_Message = ' Call to SP failed. SQL Exception, SQLCODE = '||TRIM(vSQL_Code)||', SQLSTATE = '||vSQL_State||', Error Msg = '||vError_Text;
+END;
+ 
+CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('LOAD_CNSUM_TABLES', 0, 'Started - SrcTableName '|| SrcTableName ||' TgtTableName:' || TgtTableName, 0, oSubReturn_Code, oSubReturn_Message);
+
+SET oSQL_Text = '';
+
+-- Fetch Target DB Name & Table Name into variables:
+SET vTgtTableName = TgtTableName;
+SET vSrcTableName = SrcTableName;
+SELECT TRIM(PRMTR_VAL) INTO vTempDatabaseName FROM QSIT_APRA2_CNSUM_RRP_VW.PRMTR_MSTR WHERE PRMTR_NM IN ('TmpDb');
+SELECT TRIM(PRMTR_VAL) INTO vSrcDatabaseName FROM QSIT_APRA2_CNSUM_RRP_VW.PRMTR_MSTR WHERE PRMTR_NM IN ('SrcDb');
+SELECT TRIM(PRMTR_VAL) INTO vTgtDatabaseName FROM QSIT_APRA2_CNSUM_RRP_VW.PRMTR_MSTR WHERE PRMTR_NM IN ('TrgDb');
+SELECT TRIM(PRMTR_VAL) INTO vReportingPeriodDatabaseName FROM QSIT_APRA2_CNSUM_RRP_VW.PRMTR_MSTR WHERE PRMTR_NM IN ('RptPrdDb');
+SELECT TRIM(PRMTR_VAL) INTO vReportingPeriodTableName FROM QSIT_APRA2_CNSUM_RRP_VW.PRMTR_MSTR WHERE PRMTR_NM IN ('RptPrdTbl');
+
+-- Step0: Clean-up: Delete data from GTT table before starting gen Query:
+
+ ----------------------------------------------------------------------------------------------------------------------
+ ---- Fetch DatabaseName & TableName from dbc.Tables for Step-0{ delete -Clean-up-Up}
+ ----------------------------------------------------------------------------------------------------------------------
+
+SELECT TRIM(TABLENAME ), TRIM(DatabaseName) INTO vTgt_Tbl, vTemp_DB
+FROM dbc.TablesV
+WHERE TABLENAME =vTgtTableName AND  DatabaseName =vTempDatabaseName;
+
+SELECT  TRIM(DatabaseName) INTO vTgt_DB
+FROM dbc.TablesV
+WHERE TABLENAME =vTgtTableName AND  DatabaseName =vTgtDatabaseName;
+
+SET vSQL_Text1 = vSQL_Text1 || cLF|| '--Step0: Clean-up: Delete from GTT table before insertion' || cLF ||
+                                'DELETE FROM ' || vTemp_DB|| '.' || vTgt_Tbl || ';';
+
+-- Step1: Load into GTT from Gen View:
+
+SET vSQL_Text2 = vSQL_Text2 || cLF || cLF ||' --Step1: Load into GTT from Gen View:' || cLF ||
+				                'INSERT INTO '|| vTemp_DB || '.' || vTgt_Tbl || cLF || '( ';
+
+ ----------------------------------------------------------------------------------------------------------------
+ ---- Fetch the Target Table - ColumnName from dbc.ColumnV for Inset Into for Step-1
+ -----------------------------------------------------------------------------------------------------------------
+ 
+SET vLoopCount = 0;
+
+L1:
+FOR	CSR1 AS 
+SELECT TRIM(ColumnId)  AS ColumnId , TRIM(ColumnName) AS Attr_Nm
+FROM dbc.ColumnsV 
+WHERE TABLENAME = vTgtTableName AND DatabaseName =vTempDatabaseName
+ORDER BY ColumnId
+
+DO
+
+SET vLoopCount = vLoopCount + 1;
+
+CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('LOAD_CNSUM_TABLES', 100, 'Begin looop L1 CSR1.tgt_ColumnName'||CSR1.Attr_Nm, 1, oSubReturn_Code, oSubReturn_Message);
+
+IF vLoopCount = 1 THEN
+	SET vComma = '';
+ELSE 
+	SET vComma = ',';
+END IF;
+
+SET vSQL_Text2 = vSQL_Text2 || cLF ||vComma|| CSR1.Attr_Nm;
+
+CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('LOAD_CNSUM_TABLES', 100, 'End looop L1 CSR1.tgt_ColumnName', 1, oSubReturn_Code, oSubReturn_Message);	
+
+END FOR L1;
+
+SET vSQL_Text2 = vSQL_Text2 || cLF || ' )' || cLF || 'SELECT' ;
+
+---------------------------------------------------------------------------------------------------------------------------------------
+ ---- Generating Select ColumnName by LeftOuter Join b/w Tgt_Table view & Src_Table view for Step-1
+---------------------------------------------------------------------------------------------------------------------------------------
+
+SET vLoopCount = 0;
+
+ L2:
+FOR CSR2 AS
+SELECT TRIM(tgt.ColumnId) AS tgt_ColumnId , TRIM(tgt.ColumnName) AS tgt_ColumnName, TRIM(src.ColumnId) AS src_ColumnId, 
+TRIM(src.ColumnName) AS src_ColumnName, TRIM(tgt.ColumnType) AS tgt_ColumnType
+ FROM (SELECT  TRIM(ColumnName) AS ColumnName, TRIM(ColumnId) AS ColumnId, TRIM(ColumnType) AS ColumnType
+        FROM dbc.ColumnsV WHERE TABLENAME =vTgtTableName AND DatabaseName=vTempDatabaseName) tgt
+LEFT OUTER JOIN 
+       (SELECT  TRIM(ColumnName) AS ColumnName, TRIM(ColumnId) AS ColumnId
+        FROM dbc.ColumnsV WHERE TABLENAME =vSrcTableName AND DatabaseName=vSrcDatabaseName) src
+		ON src.ColumnName = tgt.ColumnName
+		ORDER BY tgt_ColumnId
+		
+DO
+
+SET vLoopCount = vLoopCount + 1;
+
+IF vLoopCount = 1 THEN
+	SET vComma = '';
+ELSE 
+	SET vComma = ',';
+END IF;
+
+CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('LOAD_CNSUM_TABLES', 200, 'Begin looop L2 CSR2.tgt_ColumnName'|| CSR2.tgt_ColumnName|| 'CSR2.Src_ColumnName '||CSR2.src_ColumnName, 2, oSubReturn_Code, oSubReturn_Message);
+
+CASE 
+
+WHEN  vReportingPeriodDatabaseName <> '' AND CSR2.tgt_ColumnName = 'BSNS_DT' THEN 
+	SET vSQL_Text2 = vSQL_Text2 || cLF ||vComma||'CAST (b.END_TS AS DATE) AS ' || CSR2.tgt_ColumnName ;
+WHEN CSR2.tgt_ColumnName = 'ETL_SRC_VIEW_NM'  THEN 
+	SET vSQL_Text2 = vSQL_Text2 || cLF ||vComma||'''' || vSrcTableName || ''' AS ' || CSR2.tgt_ColumnName ;
+WHEN CSR2.src_ColumnId IS NULL THEN  
+	SET vSQL_Text2 = vSQL_Text2 || cLF ||vComma||'NULL AS ' || CSR2.tgt_ColumnName;
+WHEN CSR2.tgt_ColumnType = 'CV' THEN
+	SET vSQL_Text2 = vSQL_Text2 || cLF ||vComma|| 'TRIM (' || CSR2.src_ColumnName || ') AS ' ||CSR2. tgt_ColumnName;
+ELSE 		
+	SET vSQL_Text2 = vSQL_Text2 || cLF ||vComma|| CSR2.src_ColumnName || ' AS ' ||CSR2. tgt_ColumnName;
+END CASE;
+
+CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('LOAD_CNSUM_TABLES', 200, 'End looop L2 CSR2.tgt_ColumnName', 2, oSubReturn_Code, oSubReturn_Message);	
+
+END FOR L2;
+
+SET vSQL_Text2 = vSQL_Text2 || cLF || ' FROM ' ;
+
+ -----------------------------------------------------------------------------------------------------------------
+ ---- Fetch DatabaseName & TableName from dbc.Tables for FROM clause of step-1
+ ----------------------------------------------------------------------------------------------------------------
+
+SELECT TRIM(a.TABLENAME ), TRIM(a.DatabaseName), TRIM(b.TABLENAME ), TRIM(b.DatabaseName)  INTO  vSrc_Tbl, vSrc_DB,  vRep_Tbl, vRep_DB 
+FROM (SELECT TRIM(TABLENAME ) AS  TABLENAME , TRIM(DatabaseName) AS DatabaseName  FROM dbc.TablesV  WHERE TABLENAME =vSrcTableName AND  DatabaseName =vSrcDatabaseName )  a
+CROSS JOIN
+(SELECT TRIM(TABLENAME ) AS TABLENAME, TRIM(DatabaseName) AS DatabaseName FROM dbc.TablesV WHERE TABLENAME =vReportingPeriodTableName AND  DatabaseName =vReportingPeriodDatabaseName) b;
+
+IF vRep_DB <> '' AND vRep_Tbl  <> '' THEN 
+
+SET vSQL_Text2 = vSQL_Text2 || vSrc_DB || '.' || vSrc_Tbl || ' a '|| cLF || 'CROSS JOIN ' || vRep_DB || '.' || vRep_Tbl || ' b' || ';' ;
+ELSE
+SET vSQL_Text2 = vSQL_Text2 || vSrc_DB || '.' || vSrc_Tbl || ';' ;
+
+END IF;
+
+-- Step2: Delete from final table based on ETL_SRC_VIEW_NM
+
+IF vRep_DB <> '' AND vRep_Tbl  <> '' THEN 
+  
+SET vSQL_Text3 = vSQL_Text3 || cLF || cLF ||'--Step2: Delete from final table based on ETL_SRC_VIEW_NM:' || cLF ||
+							'DELETE FROM '|| vTgt_DB || '.' || vTgt_Tbl  || ' WHERE BSNS_DT = (SELECT CAST (END_TS AS DATE) FROM ' || vRep_DB || '.' || vRep_Tbl || ') AND ETL_SRC_VIEW_NM = ' ||  '''' ||vSrc_Tbl || ''';';
+ELSE
+SET vSQL_Text3 = vSQL_Text3 || cLF || cLF ||'--Step2: Delete from final table based on ETL_SRC_VIEW_NM:' || cLF ||
+							'DELETE FROM '|| vTgt_DB || '.' || vTgt_Tbl  || ' WHERE  ETL_SRC_VIEW_NM = ' ||  '''' ||vSrc_Tbl || ''';';
+
+END IF;
+
+ -- Step3: Load into final table from GTT
+
+SET vSQL_Text4 = vSQL_Text4 ||cLF || cLF || '--Step3: Load into final table from GTT'||  cLF|| 
+			                	'INSERT INTO ' || vTgt_DB || '.' || vTgt_Tbl || cLF || '(' ;
+
+----------------------------------------------------------------------------------------------------------------
+ ---- Fetch the Target Table - ColumnName from dbc.ColumnV for Inset Into for Step-3
+ -----------------------------------------------------------------------------------------------------------------
+SET vLoopCount = 0;
+
+L3:
+FOR	CSR3 AS 
+SELECT TRIM( ColumnId)  AS ColumnId , TRIM(ColumnName) AS Attr_Nm
+FROM dbc.ColumnsV 
+WHERE TABLENAME = vTgtTableName AND DatabaseName =vTgtDatabaseName
+ORDER BY ColumnId
+
+DO
+
+SET vLoopCount = vLoopCount + 1;
+
+CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('LOAD_CNSUM_TABLES', 300, 'Begin looop L3 CSR1.tgt_ColumnName '||CSR3.Attr_Nm, 3, oSubReturn_Code, oSubReturn_Message);
+
+IF vLoopCount = 1 THEN
+	SET vComma = '';
+ELSE 
+	SET vComma = ',';
+END IF;
+
+SET vSQL_Text4 = vSQL_Text4 || cLF ||vComma|| CSR3.Attr_Nm;
+
+CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('LOAD_CNSUM_TABLES', 300, 'End looop L3 CSR1.tgt_ColumnName', 3, oSubReturn_Code, oSubReturn_Message);	
+
+END FOR L3;
+
+SET vSQL_Text4 = vSQL_Text4 || cLF || ' )' || cLF || 'SELECT' ;
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ ---Generating Select ColumnName by LeftOuter Join b/w Tgt_Table view  in Temp DB & Tgt_Table view  in Tgt_DB  for Step-3
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+SET vLoopCount = 0;
+
+L4:
+FOR CSR4 AS
+SELECT TRIM(tgt.ColumnId) AS tgt_ColumnId , TRIM(tgt.ColumnName) AS tgt_ColumnName, TRIM(src.ColumnId) AS src_ColumnId, TRIM(src.ColumnName) AS src_ColumnName
+ FROM (SELECT TRIM(ColumnName) AS ColumnName, TRIM(ColumnId) AS  ColumnId
+        FROM dbc.ColumnsV WHERE TABLENAME =vTgtTableName AND DatabaseName=vTgtDatabaseName) tgt 
+LEFT OUTER JOIN 
+       (SELECT TRIM(ColumnName) AS ColumnName, TRIM(ColumnId) AS  ColumnId
+        FROM dbc.ColumnsV WHERE TABLENAME =vTgtTableName AND DatabaseName=vTempDatabaseName) src
+		ON src.ColumnName = tgt.ColumnName
+		ORDER BY tgt_ColumnId
+		
+DO
+
+SET vLoopCount = vLoopCount + 1;
+
+IF vLoopCount = 1 THEN
+	SET vComma = '';
+ELSE 
+	SET vComma = ',';
+END IF;
+
+CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('LOAD_CNSUM_TABLES', 400, 'Begin looop L4 CSR4.tgt_ColumnName'|| CSR4.tgt_ColumnName|| 'CSR4.src_ColumnName '||CSR4.src_ColumnName, 4, oSubReturn_Code, oSubReturn_Message);
+
+CASE
+WHEN CSR4.src_ColumnId IS NULL THEN 
+SET vSQL_Text4 = vSQL_Text4 || cLF ||vComma|| 'NULL AS ' || CSR4.tgt_ColumnName;																	   
+ELSE 
+SET vSQL_Text4 = vSQL_Text4 || cLF ||vComma|| CSR4.src_ColumnName || ' AS ' ||CSR4. tgt_ColumnName;
+END CASE;
+
+CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('LOAD_CNSUM_TABLES', 400, 'End looop L4 CSR4.tgt_ColumnName', 4, oSubReturn_Code, oSubReturn_Message);	
+
+END FOR L4;
+
+SET vSQL_Text4 = vSQL_Text4 || cLF || ' FROM ' || vTemp_DB || '.' || vTgt_Tbl  || ';' ;
+
+SET vSQL_Text = vSQL_Text1 || vSQL_Text2 || vSQL_Text3 || vSQL_Text4 ;
+CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('LOAD_CNSUM_TABLES', 500, '--SQL Generated: ' || cLF || vSQL_Text, 5, oSubReturn_Code, oSubReturn_Message);	
+
+IF iExec_Mode = 'Y'  THEN 
+		EXECUTE IMMEDIATE vSQL_Text1;
+		SET vActivityCount = ACTIVITY_COUNT;
+		CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('LOAD_CNSUM_TABLES', 600, 'Step 1 (Delete from GTT) Completed. Activity Count = ' ||  vActivityCount, 0, oSubReturn_Code, oSubReturn_Message);
+		EXECUTE IMMEDIATE vSQL_Text2;
+		SET vActivityCount = ACTIVITY_COUNT;
+		CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('LOAD_CNSUM_TABLES', 700, 'Step 2 (Insert into GTT) Completed. Activity Count = ' ||  vActivityCount, 0, oSubReturn_Code, oSubReturn_Message);
+		EXECUTE IMMEDIATE vSQL_Text3;
+		SET vActivityCount = ACTIVITY_COUNT;
+		CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('LOAD_CNSUM_TABLES', 800, 'Step 3 (Delete from Target) Completed. Activity Count = ' ||  vActivityCount, 0, oSubReturn_Code, oSubReturn_Message);
+		EXECUTE IMMEDIATE vSQL_Text4;
+		SET vActivityCount = ACTIVITY_COUNT;
+		CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('LOAD_CNSUM_TABLES', 900, 'Step 4 (Insert into Target) Completed. Activity Count = ' ||  vActivityCount, 0, oSubReturn_Code, oSubReturn_Message);
+        
+		SET oSQL_Text = vSQL_Text;
+		SET oReturn_Code = 0;
+		SET oReturn_Message='Success - Executed the generated SQL. Rows Inserted into Target Table : ' || vActivityCount;
+		CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('LOAD_CNSUM_TABLES', 1000, 'Ended SP - SrcTableName '|| SrcTableName ||' TgtTableName:' || TgtTableName || 'oSQL_Text-Final_Ins_Sel_query:'||oSQL_Text, 0, oSubReturn_Code, oSubReturn_Message);
+		LEAVE MAIN;
+END IF;
+
+SET oReturn_Code = 0;
+SET oReturn_Message='Success - Did not executed the generated SQL as Execute mode : N ';
+
+SET oSQL_Text = vSQL_Text;
+
+CALL QSIT_APRA2_CNSUM_RRP_PGM.CNSUM_ERRORLOG ('LOAD_CNSUM_TABLES', 1100, 'Ended SP - SrcTableName '|| SrcTableName ||' TgtTableName:' || TgtTableName || 'oSQL_Text-Final_Ins_Sel_query:'||oSQL_Text, 0, oSubReturn_Code, oSubReturn_Message);
+
+END MAIN;
