@@ -1,0 +1,51 @@
+
+Recursive Query : http://www.teradatatech.com/?p=1444
+
+
+.logon AIPQA.UNIX.ANZ/QSIT07_EDWUSER_CNSUM
+P#ssw0rd
+
+Keep logon information in one file.
+For Ex : file name - login.txt contains below
+.logon AIPQA.UNIX.ANZ/QSIT07_EDWUSER_CNSUM,P#ssw0rd;
+
+Create another file say LOAD_CNSM.BTEQ with below .
+
+.run file login.txt;
+
+ EXEC SIT07_CNSUM_RRP_PGM.LOAD_CNSUM_TABLES ('ELS_LEASE_AR', 'AR');
+ 
+ 
+.logoff;
+.quit;
+
+Now go to bteq prompt where the file is placed. And run the below
+bteq <ELS_LEASE_AR.bteq> ELS_LEASE_AR.out 2>&1
+
+
+
+If you want to compile a stored procedure using bteq :
+
+1.	Create a file which has the stored procedure : say:
+
+FP1.txt – contains SP : like Replace procedure .
+.
+.
+End;
+
+2.	Create another file say FP1.BTEQ with below
+.run file login.txt;
+.compile file FP1.txt;
+
+.logoff;
+.quit;
+
+3.	Login.txt will have the logon information like : 
+.logon AIPQA.UNIX.ANZ/QSIT_APRA2_EDWUSER_BRL,P@ssw0rd;
+
+
+
+
+
+
+
